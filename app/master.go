@@ -12,6 +12,20 @@ import (
 	"time"
 )
 
+const LOCAL_HOST_IP_ADDR = "127.0.0.1"
+const MASTER_SERVER_PORT = 8000
+const MASTER_SERVER_PORT_STR = "8000"
+const REGISTER_WORKER = "register"
+
+type IpAddr struct {
+	ip   string
+	port string
+}
+
+func (ipAddr IpAddr) String() string {
+	return ipAddr.ip + ":" + ipAddr.port
+}
+
 type MasterClientData struct {
 	workToWorkerMap   map[int](net.Conn)
 	numWorkers        int
