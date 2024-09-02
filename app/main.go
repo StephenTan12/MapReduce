@@ -8,16 +8,18 @@ const MASTER_ARG = "master"
 const WORKER_SERVER_ARG = "worker"
 
 func main() {
-	comandLineArgs := os.Args
-	serverType := comandLineArgs[1]
+	commandLineArgs := os.Args
+	serverType := commandLineArgs[1]
 
 	if serverType == MASTER_ARG {
-		createMasterClient()
+		inputFilepath := "../test-files/big.txt"
+		if len(commandLineArgs) == 3 {
+			inputFilepath = commandLineArgs[2]
+		}
+		createMasterClient(inputFilepath)
+	} else if serverType == WORKER_SERVER_ARG {
+		createWorkerServer(commandLineArgs[2])
 	} else {
-		createWorkerServer(comandLineArgs[2])
+		createAccumulatorServer()
 	}
 }
-
-/*
-	Have an accumlator that combines the results of the workers which then sends back to master
-*/

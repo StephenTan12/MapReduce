@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type WorkerInternalData struct {
@@ -22,7 +23,7 @@ type WorkerInternalData struct {
 func createWorkerServer(workerPort string) {
 	workerServerIpAddr := LOCAL_HOST_IP_ADDR + ":" + workerPort
 
-	registrationMessage := "register " + LOCAL_HOST_IP_ADDR + " " + workerPort + "\n"
+	registrationMessage := "worker " + LOCAL_HOST_IP_ADDR + " " + workerPort + "\n"
 	masterIpAddr := LOCAL_HOST_IP_ADDR + ":" + MASTER_SERVER_PORT_STR
 	response, masterConn := writeToServer(masterIpAddr, registrationMessage)
 
@@ -50,7 +51,6 @@ func createWorkerServer(workerPort string) {
 	fmt.Printf("worker %s is ready to start accepting\n", workerServerIpAddr)
 
 	for {
-		fmt.Println("trying to read")
 		data, err := bufio.NewReader(internalData.masterConn).ReadString('\n')
 		if err != nil {
 			masterConn.Close()
@@ -58,7 +58,6 @@ func createWorkerServer(workerPort string) {
 			return
 		}
 
-		fmt.Println("read: " + data)
 		formattedData := strings.Split(strings.TrimSpace(data), " ")
 
 		if formattedData[0] == "add" {
@@ -74,7 +73,11 @@ func createWorkerServer(workerPort string) {
 
 	fmt.Printf("worker %d is sorting words\n", internalData.workerNum)
 	sort.Strings(internalData.words)
-	fmt.Println(internalData.words)
+
+	fmt.Printf("worker %d is sending words to accumulator\n", internalData.workerNum)
+	sendToAccumulator(&internalData)
+	fmt.Printf("worker %d has sent %d words to accumulator\n", internalData.workerNum, len(internalData.words))
+	masterConn.Close()
 }
 
 func writeToServer(ipAddr string, messageContent string) (string, net.Conn) {
@@ -102,4 +105,37 @@ func writeToServer(ipAddr string, messageContent string) (string, net.Conn) {
 	}
 
 	return response, conn
+}
+
+func sendToAccumulator(internalData *WorkerInternalData) {
+	accumulatorServerIpAddr := LOCAL_HOST_IP_ADDR + ":" + ACCUMULATOR_SERVER_PORT
+
+	addr, err := net.ResolveTCPAddr("tcp4", accumulatorServerIpAddr)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	conn, err := net.DialTCP("tcp", nil, addr)
+	defer conn.Close()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	for _, word := range internalData.words {
+		messageContent := "add " + strconv.Itoa(internalData.workerNum) + " " + word + "\n"
+		time.Sleep(3 * time.Millisecond)
+		_, err = conn.Write([]byte(messageContent))
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}
+
+	time.Sleep(3 * time.Millisecond)
+	_, err = conn.Write([]byte("done\n"))
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }

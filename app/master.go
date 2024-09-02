@@ -15,7 +15,8 @@ import (
 const LOCAL_HOST_IP_ADDR = "127.0.0.1"
 const MASTER_SERVER_PORT = 8000
 const MASTER_SERVER_PORT_STR = "8000"
-const REGISTER_WORKER = "register"
+const REGISTER_WORKER = "worker"
+const REGISTER_ACCUMULATOR = "accumulator"
 
 type IpAddr struct {
 	ip   string
@@ -27,14 +28,17 @@ func (ipAddr IpAddr) String() string {
 }
 
 type MasterClientData struct {
-	workToWorkerMap   map[int](net.Conn)
-	numWorkers        int
-	maxWorkers        int
-	mutex             sync.Mutex
-	regStageCompleted bool
+	workToWorkerMap      map[int](net.Conn)
+	accumlatorServerConn net.Conn
+	numWorkers           int
+	maxWorkers           int
+	mutex                sync.Mutex
+	regStageCompleted    bool
+	createdAccumulator   bool
+	inputFilepath        string
 }
 
-func createMasterClient() {
+func createMasterClient(inputFilepath string) {
 	fmt.Println("created master")
 
 	masterServerIPAddr := LOCAL_HOST_IP_ADDR + ":" + MASTER_SERVER_PORT_STR
@@ -53,11 +57,13 @@ func createMasterClient() {
 	}
 
 	workerData := MasterClientData{
-		workToWorkerMap:   make(map[int]net.Conn),
-		numWorkers:        0,
-		maxWorkers:        3,
-		mutex:             sync.Mutex{},
-		regStageCompleted: false,
+		workToWorkerMap:      make(map[int]net.Conn),
+		accumlatorServerConn: nil,
+		numWorkers:           0,
+		maxWorkers:           3,
+		mutex:                sync.Mutex{},
+		regStageCompleted:    false,
+		inputFilepath:        inputFilepath,
 	}
 
 	for {
@@ -66,21 +72,45 @@ func createMasterClient() {
 			fmt.Println(err)
 		}
 
-		handleWorkerRegistration(conn, &workerData)
+		handleServerRegistration(conn, &workerData)
 
-		if workerData.regStageCompleted {
+		if workerData.regStageCompleted && workerData.createdAccumulator {
 			break
 		}
 	}
 
+	message := "numWorkers " + strconv.Itoa(workerData.numWorkers) + "\n"
+	_, err = workerData.accumlatorServerConn.Write([]byte(message))
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
 	sendWordDataToWorkers(&workerData)
 
-	for {
+	data, err := bufio.NewReader(workerData.accumlatorServerConn).ReadString('\n')
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 
+	stringData := strings.TrimSpace(data)
+
+	if stringData != "done" {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	fmt.Println("the sorting of file has completed")
+
+	workerData.accumlatorServerConn.Close()
+
+	for _, conn := range workerData.workToWorkerMap {
+		conn.Close()
 	}
 }
 
-func handleWorkerRegistration(conn net.Conn, workerData *MasterClientData) {
+func handleServerRegistration(conn net.Conn, workerData *MasterClientData) {
 	data, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
 		fmt.Println(err)
@@ -111,11 +141,22 @@ func handleWorkerRegistration(conn net.Conn, workerData *MasterClientData) {
 		if workerData.numWorkers == workerData.maxWorkers {
 			workerData.regStageCompleted = true
 		}
+	} else if splittedStringData[0] == REGISTER_ACCUMULATOR {
+		workerData.accumlatorServerConn = conn
+
+		ipAddr := IpAddr{
+			ip:   splittedStringData[1],
+			port: splittedStringData[2],
+		}
+
+		fmt.Printf("registered accumulator from %s:%s\n", ipAddr.ip, ipAddr.port)
+
+		workerData.createdAccumulator = true
 	}
 }
 
 func sendWordDataToWorkers(workerData *MasterClientData) {
-	f, err := os.Open("../test-files/1000-common-words.txt")
+	f, err := os.Open(workerData.inputFilepath)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
